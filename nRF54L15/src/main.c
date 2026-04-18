@@ -4,7 +4,7 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/adc.h>
-
+#include <zephyr/sys/printk.h>
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 #if !DT_NODE_EXISTS(DT_PATH(zephyr_user)) || \
@@ -82,23 +82,26 @@ int main(void)
             sensor_channel_get(bme280_dev, SENSOR_CHAN_HUMIDITY, &humidity);
 
             /* Wyświetlenie w terminalu (ciśnienie mnożymy x10, bo Zephyr podaje w kPa) */
-            LOG_INF("Temperatura: %.2f C | Cisnienie: %.2f hPa | Wilgotnosc: %.2f %%",
-                    sensor_value_to_double(&temp),
-                    sensor_value_to_double(&press) * 10.0,
-                    sensor_value_to_double(&humidity));
+            // LOG_INF("Temperatura: %.2f C | Cisnienie: %.2f hPa | Wilgotnosc: %.2f %%",
+                    // sensor_value_to_double(&temp),
+                    // sensor_value_to_double(&press) * 10.0,
+                    // sensor_value_to_double(&humidity));
         }
 
         if (device_is_ready(vl53l0x_dev))
         {
             sensor_sample_fetch(vl53l0x_dev);
             sensor_channel_get(vl53l0x_dev, SENSOR_CHAN_DISTANCE, &distance);
-            LOG_INF("Dystans VL53L0X: %.3f m", sensor_value_to_double(&distance));
+            // printk("x: %d\n", sensor_value_to_double(&distance));
+            // LOG_INF("Dystans VL53L0X: %.3f m", sensor_value_to_double(&distance));
         }
 
         err = adc_read_dt(&adc_channel, &sequence);
         if (err == 0)
         {
-            LOG_INF("Wartosc napiecia (szurowe ADC): %d", sample_buffer);
+            // LOG_INF("adc: %d", sample_buffer);
+            printk("x: %d\n",sample_buffer);
+
         }
         else
         {
