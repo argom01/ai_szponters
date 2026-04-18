@@ -1,0 +1,14 @@
+{
+  "name": "ai-szponters-node-socket-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simple TCP socket server for nRF7002 board connectivity testing",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "probe-board": "node probe-board-socket.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

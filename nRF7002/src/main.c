@@ -38,6 +38,7 @@
 
 #include "credentials_provision.h"
 #include "data.h"
+#include "node_socket_client.h"
 #include "predictor.h"
 
 LOG_MODULE_REGISTER(http_server, CONFIG_HTTP_SERVER_SAMPLE_LOG_LEVEL);
@@ -1022,6 +1023,7 @@ int main(void)
 	}
 
 	k_sem_take(&network_connected_sem, K_FOREVER);
+	node_socket_client_start();
 
 	start_listener();
 

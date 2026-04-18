@@ -47,6 +47,40 @@ config HTTP_SERVER_SAMPLE_RECEIVE_BUFFER_SIZE
 	help
 	  This option sets the receive buffer size for the sockets used in the sample.
 
+config APP_NODE_SOCKET_CLIENT
+	bool "Enable Node TCP client heartbeat"
+	default y
+	help
+	  Enable periodic outbound TCP connection from board firmware to an external
+	  Node.js socket server.
+
+config APP_NODE_SOCKET_SERVER_IPV4
+	string "Node server IPv4 address"
+	default "172.20.10.1"
+	help
+	  IPv4 address of the machine running the Node.js TCP server.
+
+config APP_NODE_SOCKET_SERVER_PORT
+	int "Node server TCP port"
+	default 19000
+	range 1 65535
+	help
+	  TCP port used by the Node.js server.
+
+config APP_NODE_SOCKET_CLIENT_INTERVAL_SEC
+	int "Heartbeat interval (seconds)"
+	default 15
+	range 1 3600
+	help
+	  Delay between consecutive heartbeat attempts.
+
+config APP_NODE_SOCKET_CLIENT_STACK_SIZE
+	int "Node TCP client stack size"
+	default 2048
+	range 1024 8192
+	help
+	  Stack size for the TCP client thread.
+
 module = HTTP_SERVER_SAMPLE
 module-str = HTTP server sample
 source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"

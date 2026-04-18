@@ -12,6 +12,7 @@ project(project)
 target_sources(app PRIVATE src/main.c)
 target_sources(app PRIVATE src/credentials_provision.c)
 target_sources(app PRIVATE src/data.c)
+target_sources(app PRIVATE src/node_socket_client.c)
 target_sources(app PRIVATE src/predictor.c)
 target_include_directories(app PRIVATE src)
 
