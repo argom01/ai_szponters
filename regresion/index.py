@@ -6,8 +6,7 @@ Model objective:
 	- humidity
 	- pressure
 	- light (shortwave radiation)
-- using an autoregressive feature set built from previous (t-1)
-  and current (t) samples
+- using a longer autoregressive history window
 
 Install dependencies:
 	pip install requests pandas scikit-learn
@@ -26,22 +25,28 @@ from sklearn.model_selection import train_test_split
 
 OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 TARGET_COLUMNS = ["temperature", "humidity", "pressure", "light"]
-FEATURE_COLUMNS = [
-	"temperature",
-	"humidity",
-	"pressure",
-	"light",
-	"d_temperature",
-	"d_humidity",
-	"d_pressure",
-	"d_light",
-	"temperature_x_humidity",
-	"temperature_x_light",
-	"humidity_x_light",
-	"pressure_x_d_pressure",
-	"temperature_x_d_temperature",
-	"humidity_x_d_humidity",
-]
+HISTORY_STEPS = 8
+
+
+def build_feature_columns() -> list[str]:
+	"""Build deterministic feature order for both Python and C."""
+	columns: list[str] = []
+
+	# lag0 is newest sample, lag7 is the oldest sample in 8-step window
+	for lag in range(HISTORY_STEPS):
+		for base_name in TARGET_COLUMNS:
+			columns.append(f"{base_name}_lag{lag}")
+
+	for base_name in TARGET_COLUMNS:
+		columns.append(f"d_{base_name}")
+
+	for base_name in TARGET_COLUMNS:
+		columns.append(f"mean_{base_name}")
+
+	return columns
+
+
+FEATURE_COLUMNS = build_feature_columns()
 
 
 def fetch_open_meteo_hourly_data(
@@ -97,43 +102,53 @@ def fetch_open_meteo_hourly_data(
 	return data.dropna().reset_index(drop=True)
 
 
+def make_feature_row(window: pd.DataFrame) -> dict[str, float]:
+	"""Build one feature row from the history window."""
+	latest = window.iloc[-1]
+	previous = window.iloc[-2]
+	features: dict[str, float] = {}
+
+	for lag in range(HISTORY_STEPS):
+		sample = window.iloc[HISTORY_STEPS - 1 - lag]
+		for base_name in TARGET_COLUMNS:
+			features[f"{base_name}_lag{lag}"] = float(sample[base_name])
+
+	for base_name in TARGET_COLUMNS:
+		features[f"d_{base_name}"] = float(latest[base_name] - previous[base_name])
+
+	for base_name in TARGET_COLUMNS:
+		features[f"mean_{base_name}"] = float(window[base_name].mean())
+
+	return features
+
+
 def build_next_step_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-	"""Create autoregressive dataset: [state(t), trend(t)] -> state(t+1)."""
-	if len(df) < 3:
-		raise RuntimeError("Need at least 3 samples to build autoregressive features.")
+	"""Create autoregressive dataset: history(t-7..t) -> state(t+1)."""
+	if len(df) < HISTORY_STEPS + 1:
+		raise RuntimeError(
+			f"Need at least {HISTORY_STEPS + 1} samples to build dataset."
+		)
 
-	prev = df[TARGET_COLUMNS].iloc[:-2].reset_index(drop=True)
-	curr = df[TARGET_COLUMNS].iloc[1:-1].reset_index(drop=True)
-	next_state = df[TARGET_COLUMNS].iloc[2:].reset_index(drop=True)
-	delta = curr - prev
+	feature_rows: list[dict[str, float]] = []
+	target_rows: list[dict[str, float]] = []
+	base_df = df[TARGET_COLUMNS]
 
-	x = pd.DataFrame(
-		{
-			"temperature": curr["temperature"],
-			"humidity": curr["humidity"],
-			"pressure": curr["pressure"],
-			"light": curr["light"],
-			"d_temperature": delta["temperature"],
-			"d_humidity": delta["humidity"],
-			"d_pressure": delta["pressure"],
-			"d_light": delta["light"],
-			"temperature_x_humidity": curr["temperature"] * curr["humidity"],
-			"temperature_x_light": curr["temperature"] * curr["light"],
-			"humidity_x_light": curr["humidity"] * curr["light"],
-			"pressure_x_d_pressure": curr["pressure"] * delta["pressure"],
-			"temperature_x_d_temperature": curr["temperature"] * delta["temperature"],
-			"humidity_x_d_humidity": curr["humidity"] * delta["humidity"],
-		}
-	)
+	for end_idx in range(HISTORY_STEPS - 1, len(base_df) - 1):
+		window = base_df.iloc[end_idx - HISTORY_STEPS + 1 : end_idx + 1]
+		next_state = base_df.iloc[end_idx + 1]
 
-	y = next_state.copy()
+		feature_rows.append(make_feature_row(window))
+		target_rows.append({name: float(next_state[name]) for name in TARGET_COLUMNS})
+
+	x = pd.DataFrame(feature_rows, columns=FEATURE_COLUMNS)
+	y = pd.DataFrame(target_rows, columns=TARGET_COLUMNS)
 	return x, y
 
 
 def train_and_evaluate_linear_regression(
 	x: pd.DataFrame,
 	y: pd.DataFrame,
-) -> tuple[LinearRegression, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[LinearRegression, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 	"""Train multi-output linear regression and return model + evaluation artifacts."""
 	x_train, x_test, y_train, y_test = train_test_split(
 		x,
@@ -163,23 +178,24 @@ def train_and_evaluate_linear_regression(
 	return model, x_train, x_test, y_train, y_test, y_pred, metrics_df
 
 
-def print_c_export(model: LinearRegression, feature_columns: list[str], target_columns: list[str]) -> None:
+def print_c_export(model: LinearRegression) -> None:
 	"""Print C-friendly coefficients for easy copy/paste."""
-	print("\nC export (enhanced autoregressive model)")
-	print(f"#define MODEL_FEATURE_COUNT {len(feature_columns)}")
-	print(f"#define MODEL_TARGET_COUNT {len(target_columns)}")
+	print("\nC export (long-history autoregressive model)")
+	print(f"#define WEATHER_MODEL_HISTORY_STEPS {HISTORY_STEPS}U")
+	print(f"#define MODEL_FEATURE_COUNT {len(FEATURE_COLUMNS)}")
+	print(f"#define MODEL_TARGET_COUNT {len(TARGET_COLUMNS)}")
 
 	intercepts = ", ".join(f"{value:.15f}" for value in model.intercept_)
 	print(f"static const double MODEL_INTERCEPTS[MODEL_TARGET_COUNT] = {{{intercepts}}};")
 
 	print("static const double MODEL_COEFFICIENTS[MODEL_TARGET_COUNT][MODEL_FEATURE_COUNT] = {")
-	for target_name, coef_row in zip(target_columns, model.coef_):
+	for target_name, coef_row in zip(TARGET_COLUMNS, model.coef_):
 		joined = ", ".join(f"{value:.15f}" for value in coef_row)
 		print(f"\t/* {target_name} */ {{{joined}}},")
 	print("};")
 
 	print("\nFeature order for C:")
-	for idx, name in enumerate(feature_columns):
+	for idx, name in enumerate(FEATURE_COLUMNS):
 		print(f"{idx:2d}: {name}")
 
 
@@ -201,6 +217,8 @@ def main() -> None:
 	x, y = build_next_step_dataset(df)
 	model, x_train, x_test, y_train, y_test, y_pred, metrics = train_and_evaluate_linear_regression(x, y)
 
+	print(f"History steps: {HISTORY_STEPS}")
+	print(f"Feature count: {len(FEATURE_COLUMNS)}")
 	print(f"Train rows: {len(x_train)}")
 	print(f"Test rows:  {len(x_test)}")
 
@@ -229,7 +247,7 @@ def main() -> None:
 	print("\nSample predictions (test set, first 5 rows)")
 	print(preview.to_string(index=False, float_format=lambda v: f"{v:8.3f}"))
 
-	print_c_export(model, FEATURE_COLUMNS, TARGET_COLUMNS)
+	print_c_export(model)
 
 
 if __name__ == "__main__":

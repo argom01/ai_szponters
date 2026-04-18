@@ -423,24 +423,43 @@ static int send_prediction_response(struct http_req *request)
 	char header[176];
 	uint8_t meta[PRED_BIN_HEADER_SIZE];
 	float packed[4];
-	struct sensor_sample latest;
-	struct sensor_sample previous;
-	struct sensor_sample prev_state;
-	struct sensor_sample current;
+	struct sensor_sample history_window[WEATHER_MODEL_HISTORY_STEPS];
+	struct sensor_sample oldest_available;
 	struct sensor_sample predicted;
 	size_t history_points = sensor_ringbuffer_size(&sensor_data);
+	size_t usable_history;
 	unsigned int payload_len;
-
-	if (!sensor_ringbuffer_get_latest(&sensor_data, 0U, &latest)) {
-		return -ENOENT;
-	}
 
 	if (history_points > SENSOR_JSON_MAX_POINTS) {
 		history_points = SENSOR_JSON_MAX_POINTS;
 	}
 
-	if (!sensor_ringbuffer_get_latest(&sensor_data, 1U, &previous)) {
-		previous = latest;
+	if (history_points == 0U) {
+		return -ENOENT;
+	}
+
+	usable_history = history_points;
+	if (usable_history > WEATHER_MODEL_HISTORY_STEPS) {
+		usable_history = WEATHER_MODEL_HISTORY_STEPS;
+	}
+
+	if (!sensor_ringbuffer_get_latest(&sensor_data, usable_history - 1U,
+					  &oldest_available)) {
+		return -ENOENT;
+	}
+
+	for (size_t i = 0U; i < WEATHER_MODEL_HISTORY_STEPS; i++) {
+		history_window[i] = oldest_available;
+	}
+
+	for (size_t i = 0U; i < usable_history; i++) {
+		size_t age = (usable_history - 1U) - i;
+		size_t dst = (WEATHER_MODEL_HISTORY_STEPS - usable_history) + i;
+
+		if (!sensor_ringbuffer_get_latest(&sensor_data, age,
+						  &history_window[dst])) {
+			return -ENOENT;
+		}
 	}
 
 	payload_len = PRED_BIN_HEADER_SIZE +
@@ -496,11 +515,13 @@ static int send_prediction_response(struct http_req *request)
 		}
 	}
 
-	prev_state = previous;
-	current = latest;
-
 	for (size_t i = 0; i < PREDICTION_STEPS_AHEAD; i++) {
-		weather_predict_next_sample(&prev_state, &current, &predicted);
+		if (!weather_predict_next_sample_from_history(
+				history_window,
+				WEATHER_MODEL_HISTORY_STEPS,
+				&predicted)) {
+			return -EINVAL;
+		}
 
 		packed[0] = (float)predicted.temperature;
 		packed[1] = (float)predicted.humidity;
@@ -512,8 +533,10 @@ static int send_prediction_response(struct http_req *request)
 			return ret;
 		}
 
-		prev_state = current;
-		current = predicted;
+		for (size_t j = 1U; j < WEATHER_MODEL_HISTORY_STEPS; j++) {
+			history_window[j - 1U] = history_window[j];
+		}
+		history_window[WEATHER_MODEL_HISTORY_STEPS - 1U] = predicted;
 	}
 
 	return 0;
