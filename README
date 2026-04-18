@@ -1,2 +1,29 @@
-blablabla 
-blebleble
+Projekt Heimdall: Rozproszona Sieć Inteligencji Miejskiej i Wczesnego Ostrzegania
+
+Wizja Systemu
+Projekt zakłada stworzenie wysoce skalowalnej, zdecentralizowanej sieci IoT, zaprojektowanej do monitorowania i analizy środowiska w czasie rzeczywistym. System opiera się na niezależnych, modułowych "komórkach", które mogą być łatwo wdrażane w zróżnicowanej infrastrukturze – od prywatnych domów i mieszkań, przez szklarnie, aż po hale magazynowe i obiekty przemysłowe.
+
+Architektura Sprzętowa: Komórki i Sensory
+Podstawową jednostką sieci jest pojedyncza komórka, składająca się z dwóch warstw komunikacyjnych:
+
+    Heimdall (Bramka Centralna / Gateway): Serce układu, podłączone do Internetu za pomocą Wi-Fi. Pełni rolę inteligentnego węzła zbierającego dane i zarządzającego komórką.
+
+    Runy (Węzły Sensoryczne): Rozproszone czujniki środowiskowe komunikujące się z bramką za pośrednictwem energooszczędnego protokołu Zigbee.
+
+Obecnie system w fazie MVP (Minimum Viable Product) operuje na czujnikach temperatury, wilgotności i ciśnienia atmosferycznego. Architektura jest jednak w pełni otwarta i modułowa – pozwala na bezproblemową integrację dowolnych, kompatybilnych czujników (np. jakości powietrza, zalania czy wstrząsów), dostosowując sieć do potrzeb konkretnego użytkownika.
+
+Dwupoziomowa Architektura AI (Edge & Cloud)
+Prawdziwa innowacja projektu opiera się na hybrydowym przetwarzaniu danych sztucznej inteligencji:
+
+    Edge AI (Inteligencja Brzegowa): Bramki Heimdall (lub same "Runy") wyposażone są w lekkie modele uczenia maszynowego. Analizują one dane lokalnie, natychmiast ewaluując stan pojedynczej komórki. Zapewnia to błyskawiczny czas reakcji i odciąża główną sieć.
+
+    Cloud AI (Inteligencja Chmurowa / Yggdrasil): Potężny model analityczny działający w chmurze, który agreguje dane z setek lub tysięcy komórek. Analizuje on zjawiska w szerokim kontekście terytorialnym (dzielnicy, miasta, regionu czy kraju).
+
+Kluczowe Zastosowania
+Dzięki fuzji danych z wielu punktów i zaawansowanej analityce AI, system oferuje bezprecedensowe możliwości:
+
+    Hiperlokalna Analityka Pogodowa: Precyzyjne modelowanie i przewidywanie mikroklimatu na podstawie gęstej siatki odczytów.
+
+    Wykrywanie Anomalii (Detekcja "Ragnaroku"): Rozpoznawanie nietypowych, niebezpiecznych wzorców w danych środowiskowych w skali makro.
+
+    Zdecentralizowany System Wczesnego Ostrzegania: Błyskawiczne powiadamianie mieszkańców o zbliżających się, zlokalizowanych zagrożeniach (np. gwałtowne burze, podtopienia, gwałtowne spadki ciśnienia), tworząc miejską tarczę informacyjną.
