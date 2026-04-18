@@ -38,6 +38,7 @@
 
 #include "credentials_provision.h"
 #include "data.h"
+#include "predictor.h"
 
 LOG_MODULE_REGISTER(http_server, CONFIG_HTTP_SERVER_SAMPLE_LOG_LEVEL);
 
@@ -98,6 +99,10 @@ static uint8_t led_states[2];
 #define SENSOR_BIN_MAGIC 0x31534E53U /* "SNS1" (little-endian) */
 #define SENSOR_BIN_HEADER_SIZE 8U
 #define SENSOR_BIN_SAMPLE_SIZE 16U
+#define PRED_BIN_MAGIC 0x31445250U /* "PRD1" (little-endian) */
+#define PRED_BIN_HEADER_SIZE 12U
+#define PRED_BIN_SAMPLE_SIZE SENSOR_BIN_SAMPLE_SIZE
+#define PREDICTION_STEPS_AHEAD 6U
 
 static const unsigned char index_html[] = {
 #if defined(HTTP_SERVER_INDEX_HTML_INC)
@@ -412,6 +417,108 @@ static int send_sensor_data_response(struct http_req *request)
 	return 0;
 }
 
+static int send_prediction_response(struct http_req *request)
+{
+	int ret;
+	char header[176];
+	uint8_t meta[PRED_BIN_HEADER_SIZE];
+	float packed[4];
+	struct sensor_sample latest;
+	struct sensor_sample previous;
+	struct sensor_sample prev_state;
+	struct sensor_sample current;
+	struct sensor_sample predicted;
+	size_t history_points = sensor_ringbuffer_size(&sensor_data);
+	unsigned int payload_len;
+
+	if (!sensor_ringbuffer_get_latest(&sensor_data, 0U, &latest)) {
+		return -ENOENT;
+	}
+
+	if (history_points > SENSOR_JSON_MAX_POINTS) {
+		history_points = SENSOR_JSON_MAX_POINTS;
+	}
+
+	if (!sensor_ringbuffer_get_latest(&sensor_data, 1U, &previous)) {
+		previous = latest;
+	}
+
+	payload_len = PRED_BIN_HEADER_SIZE +
+		((unsigned int)(history_points + PREDICTION_STEPS_AHEAD) * PRED_BIN_SAMPLE_SIZE);
+
+	ret = snprintk(header, sizeof(header),
+		       "%sContent-Type: application/octet-stream\r\n"
+		       "Cache-Control: no-store\r\n"
+		       "Content-Length: %u\r\n\r\n",
+		       RESPONSE_200, payload_len);
+	if ((ret < 0) || (ret >= sizeof(header))) {
+		return -ENOBUFS;
+	}
+
+	ret = send_response_raw(request, header, ret);
+	if (ret) {
+		return ret;
+	}
+
+	meta[0] = (uint8_t)(PRED_BIN_MAGIC & 0xFFU);
+	meta[1] = (uint8_t)((PRED_BIN_MAGIC >> 8) & 0xFFU);
+	meta[2] = (uint8_t)((PRED_BIN_MAGIC >> 16) & 0xFFU);
+	meta[3] = (uint8_t)((PRED_BIN_MAGIC >> 24) & 0xFFU);
+	meta[4] = (uint8_t)(history_points & 0xFFU);
+	meta[5] = (uint8_t)((history_points >> 8) & 0xFFU);
+	meta[6] = (uint8_t)(PREDICTION_STEPS_AHEAD & 0xFFU);
+	meta[7] = (uint8_t)((PREDICTION_STEPS_AHEAD >> 8) & 0xFFU);
+	meta[8] = (uint8_t)(PRED_BIN_SAMPLE_SIZE & 0xFFU);
+	meta[9] = (uint8_t)((PRED_BIN_SAMPLE_SIZE >> 8) & 0xFFU);
+	meta[10] = 0U;
+	meta[11] = 0U;
+
+	ret = send_response_raw(request, (const char *)meta, sizeof(meta));
+	if (ret) {
+		return ret;
+	}
+
+	for (size_t i = history_points; i > 0; i--) {
+		struct sensor_sample sample;
+
+		if (!sensor_ringbuffer_get_latest(&sensor_data, i - 1U, &sample)) {
+			return -ENOENT;
+		}
+
+		packed[0] = (float)sample.temperature;
+		packed[1] = (float)sample.humidity;
+		packed[2] = (float)sample.pressure;
+		packed[3] = (float)sample.light;
+
+		ret = send_response_raw(request, (const char *)packed, sizeof(packed));
+		if (ret) {
+			return ret;
+		}
+	}
+
+	prev_state = previous;
+	current = latest;
+
+	for (size_t i = 0; i < PREDICTION_STEPS_AHEAD; i++) {
+		weather_predict_next_sample(&prev_state, &current, &predicted);
+
+		packed[0] = (float)predicted.temperature;
+		packed[1] = (float)predicted.humidity;
+		packed[2] = (float)predicted.pressure;
+		packed[3] = (float)predicted.light;
+
+		ret = send_response_raw(request, (const char *)packed, sizeof(packed));
+		if (ret) {
+			return ret;
+		}
+
+		prev_state = current;
+		current = predicted;
+	}
+
+	return 0;
+}
+
 /* Handle HTTP request */
 static void handle_http_request(struct http_req *request)
 {
@@ -436,6 +543,18 @@ static void handle_http_request(struct http_req *request)
 		ret = send_sensor_data_response(request);
 		if (ret) {
 			LOG_ERR("send_sensor_data_response, error: %d", ret);
+		}
+
+		return;
+	}
+
+	if (request->method == HTTP_GET &&
+	    (url_matches(request, "/api/predict.bin") ||
+	     url_matches(request, "/api/predict") ||
+	     url_matches(request, "/api/predict/next"))) {
+		ret = send_prediction_response(request);
+		if (ret) {
+			LOG_ERR("send_prediction_response, error: %d", ret);
 		}
 
 		return;
