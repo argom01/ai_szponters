@@ -8,6 +8,7 @@
 #include <zephyr/sys/printk.h>
 
 #include "node_socket_client.h"
+#include "data.h"
 
 LOG_MODULE_REGISTER(node_socket_client, CONFIG_HTTP_SERVER_SAMPLE_LOG_LEVEL);
 
@@ -19,6 +20,23 @@ K_THREAD_STACK_DEFINE(node_socket_client_stack, CONFIG_APP_NODE_SOCKET_CLIENT_ST
 static struct k_thread node_socket_client_thread;
 static bool node_socket_client_started;
 
+static int send_all(int sock, const uint8_t *buf, size_t len)
+{
+	size_t sent = 0U;
+
+	while (sent < len) {
+		int ret = send(sock, buf + sent, len - sent, 0);
+
+		if (ret <= 0) {
+			return -errno;
+		}
+
+		sent += (size_t)ret;
+	}
+
+	return 0;
+}
+
 static void node_socket_client_thread_fn(void *arg1, void *arg2, void *arg3)
 {
 	ARG_UNUSED(arg1);
@@ -28,8 +46,9 @@ static void node_socket_client_thread_fn(void *arg1, void *arg2, void *arg3)
 	while (true) {
 		int sock;
 		int ret;
-		char tx_buf[128];
+		double tx_payload[4];
 		char rx_buf[96] = {0};
+		struct sensor_sample sample;
 		struct sockaddr_in server = {
 			.sin_family = AF_INET,
 			.sin_port = htons(CONFIG_APP_NODE_SOCKET_SERVER_PORT),
@@ -38,7 +57,6 @@ static void node_socket_client_thread_fn(void *arg1, void *arg2, void *arg3)
 			.tv_sec = 4,
 			.tv_usec = 0,
 		};
-		int tx_len;
 
 		ret = zsock_inet_pton(AF_INET, CONFIG_APP_NODE_SOCKET_SERVER_IPV4,
 					    &server.sin_addr);
@@ -69,29 +87,37 @@ static void node_socket_client_thread_fn(void *arg1, void *arg2, void *arg3)
 			continue;
 		}
 
-		tx_len = snprintk(tx_buf, sizeof(tx_buf),
-				  "nRF7002 heartbeat uptime_ms=%u\\n",
-				  (unsigned int)k_uptime_get_32());
-		if (tx_len <= 0 || tx_len >= sizeof(tx_buf)) {
-			LOG_ERR("snprintk() failed for payload");
+		if (!sensor_ringbuffer_get_latest(&sensor_data, 0U, &sample)) {
+			LOG_WRN("No sensor sample available for TCP forward");
 			(void)zsock_close(sock);
 			k_sleep(K_SECONDS(CONFIG_APP_NODE_SOCKET_CLIENT_INTERVAL_SEC));
 			continue;
 		}
 
-		ret = send(sock, tx_buf, tx_len, 0);
+		tx_payload[0] = sample.temperature;
+		tx_payload[1] = sample.humidity;
+		tx_payload[2] = sample.pressure;
+		tx_payload[3] = sample.light;
+
+		ret = send_all(sock, (const uint8_t *)tx_payload, sizeof(tx_payload));
 		if (ret < 0) {
-			LOG_WRN("send() failed: %d", -errno);
+			LOG_WRN("send(sensor doubles) failed: %d", -ret);
 			(void)zsock_close(sock);
 			k_sleep(K_SECONDS(CONFIG_APP_NODE_SOCKET_CLIENT_INTERVAL_SEC));
 			continue;
 		}
+
+		LOG_INF("Forwarded sample T=%.2f H=%.2f P=%.2f L=%.2f",
+			sample.temperature,
+			sample.humidity,
+			sample.pressure,
+			sample.light);
 
 		ret = recv(sock, rx_buf, sizeof(rx_buf) - 1, 0);
 		if (ret < 0) {
 			LOG_WRN("recv() failed: %d", -errno);
 		} else {
-			rx_buf[ret] = '\\0';
+			rx_buf[ret] = '\0';
 			LOG_INF("Node ACK: %s", rx_buf);
 		}
 
