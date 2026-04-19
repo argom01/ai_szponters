@@ -51,10 +51,14 @@ static struct bt_uuid_128 pressure_char_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56781234567D));
 
 static uint16_t last_distance_mm = 0;
-static uint16_t last_light_raw = 0;
+static uint16_t last_light_lm = 0;
 static int16_t last_temp_centi = 0;
 static uint16_t last_humidity_centi = 0;
 static uint32_t last_pressure_pa = 0;
+
+#define LIGHT_ADC_MAX_RAW 4095U
+#define LIGHT_MAX_LM 1000U
+#define SENSOR_UPDATE_INTERVAL_MS 100
 
 #define NDEF_MSG_BUF_SIZE 256
 static uint8_t ndef_msg_buf[NDEF_MSG_BUF_SIZE];
@@ -87,7 +91,7 @@ static ssize_t read_distance(struct bt_conn *conn, const struct bt_gatt_attr *at
 static ssize_t read_light(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                           void *buf, uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &last_light_raw, sizeof(last_light_raw));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &last_light_lm, sizeof(last_light_lm));
 }
 
 static ssize_t read_temp(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -347,7 +351,7 @@ BT_GATT_SERVICE_DEFINE(sensor_svc,
                        BT_GATT_CHARACTERISTIC(&light_char_uuid.uuid,
                                               BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
                                               BT_GATT_PERM_READ,
-                                              read_light, NULL, &last_light_raw),
+                                              read_light, NULL, &last_light_lm),
                        BT_GATT_CCC(light_ccc_cfg_changed,
                                    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
 
@@ -381,6 +385,7 @@ int main(void)
 {
     int err;
     int ret;
+    int64_t last_update_ms;
     struct sensor_value distance;
     struct sensor_value temp;
     struct sensor_value humidity;
@@ -442,8 +447,20 @@ int main(void)
         LOG_ERR("NFC init error (%d), BLE sensor app will continue", err);
     }
 
+    last_update_ms = k_uptime_get();
+
     while (1)
     {
+        int64_t now_ms = k_uptime_get();
+
+        if ((now_ms - last_update_ms) < SENSOR_UPDATE_INTERVAL_MS)
+        {
+            k_yield();
+            continue;
+        }
+
+        last_update_ms = now_ms;
+
         if (device_is_ready(vl53l0x))
         {
             sensor_sample_fetch(vl53l0x);
@@ -495,12 +512,23 @@ int main(void)
             ret = adc_read_dt(&light_adc, &light_sequence);
             if (ret == 0)
             {
-                last_light_raw = (uint16_t)light_sample_buffer;
-                SENSOR_LOG_INF("Light(raw): %u", last_light_raw);
+                int32_t raw = light_sample_buffer;
+
+                if (raw < 0)
+                {
+                    raw = 0;
+                }
+                if (raw > LIGHT_ADC_MAX_RAW)
+                {
+                    raw = LIGHT_ADC_MAX_RAW;
+                }
+
+                last_light_lm = (uint16_t)((raw * LIGHT_MAX_LM) / LIGHT_ADC_MAX_RAW);
+                SENSOR_LOG_INF("Light(lm): %u", last_light_lm);
                 if (notify_light_enabled)
                 {
                     bt_gatt_notify_uuid(NULL, &light_char_uuid.uuid, &sensor_svc.attrs[0],
-                                        &last_light_raw, sizeof(last_light_raw));
+                                        &last_light_lm, sizeof(last_light_lm));
                 }
             }
             else
@@ -508,8 +536,6 @@ int main(void)
                 LOG_ERR("Blad odczytu ADC: %d", ret);
             }
         }
-
-        k_sleep(K_MSEC(1000));
     }
     return 0;
 }
