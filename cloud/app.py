@@ -21,6 +21,7 @@ SENSOR_SOCKET_HOST = os.getenv("SENSOR_SOCKET_HOST", "10.42.0.1")
 SENSOR_SOCKET_PORT = int(os.getenv("SENSOR_SOCKET_PORT", "19001"))
 FORWARDED_FRAME_FORMAT = os.getenv("FORWARDED_FRAME_FORMAT", "<dddd")
 FORWARDED_FRAME_SIZE = struct.calcsize(FORWARDED_FRAME_FORMAT)
+FORWARDED_FRAME_ACK = os.getenv("FORWARDED_FRAME_ACK", "ACK")
 
 socket_queue = queue.Queue()
 socket_status = {
@@ -139,8 +140,12 @@ def handle_client_connection(client_socket, client_address):
                     socket_queue.put(record)
                     with socket_status_lock:
                         socket_status["received"] += 1
+                    client_socket.sendall(FORWARDED_FRAME_ACK.encode("utf-8"))
                 except ValueError as exc:
                     set_socket_error(str(exc))
+                except OSError as exc:
+                    set_socket_error(f"ACK send failed: {exc}")
+                    return
 
         if buffer:
             set_socket_error("Incomplete forwarded frame received")
@@ -238,7 +243,10 @@ def load_data(limit=None):
     with get_connection() as connection:
         data = pd.read_sql_query(query, connection)
     if not data.empty:
-        data["timestamp"] = pd.to_datetime(data["timestamp"])
+        data["timestamp"] = data["timestamp"].apply(
+            lambda value: pd.to_datetime(value, errors="coerce", utc=True)
+        )
+        data = data.dropna(subset=["timestamp"])
     return data
 
 
