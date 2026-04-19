@@ -58,11 +58,11 @@ static uint32_t last_pressure_pa = 0;
 
 #define LIGHT_ADC_MAX_RAW 4095U
 #define LIGHT_MAX_LM 1000U
-#define SENSOR_UPDATE_INTERVAL_MS 100
+#define SENSOR_UPDATE_INTERVAL_MS 1000
 
 #define NDEF_MSG_BUF_SIZE 256
 static uint8_t ndef_msg_buf[NDEF_MSG_BUF_SIZE];
-#define NFC_PAIR_URL_BASE "http://heimdall.local/api/pair"
+#define NFC_PAIR_URL_BASE "http://10.42.0.50/api/pair"
 static char ble_mac_str[BT_ADDR_LE_STR_LEN] = "00:00:00:00:00:00";
 static char nfc_pair_url[256];
 
