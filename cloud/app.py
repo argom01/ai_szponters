@@ -5,7 +5,7 @@ import socket
 import sqlite3
 import struct
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pandas as pd
 import streamlit as st
@@ -77,7 +77,7 @@ def parse_sensor_payload(payload):
 
     timestamp = payload.get("timestamp")
     if timestamp is None:
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(UTC).isoformat()
 
     normalized = {
         "timestamp": str(timestamp),
@@ -102,7 +102,7 @@ def parse_forwarded_frame(frame_bytes, client_address):
 
     source_host, source_port = client_address
     normalized = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "cell_id": f"fwd-{source_host}",
         "sensor_id": f"fwd-{source_port}",
         "temperature": float(temperature),
@@ -125,8 +125,14 @@ def handle_client_connection(client_socket, client_address):
             socket_status["active_clients"] += 1
 
         buffer = b""
+        ack_bytes = FORWARDED_FRAME_ACK.encode("utf-8")
         while True:
-            chunk = client_socket.recv(4096)
+            try:
+                chunk = client_socket.recv(4096)
+            except (ConnectionResetError, OSError) as exc:
+                set_socket_error(f"Client {client_address} recv failed: {exc}")
+                break
+
             if not chunk:
                 break
 
@@ -140,12 +146,14 @@ def handle_client_connection(client_socket, client_address):
                     socket_queue.put(record)
                     with socket_status_lock:
                         socket_status["received"] += 1
-                    client_socket.sendall(FORWARDED_FRAME_ACK.encode("utf-8"))
+                    try:
+                        client_socket.sendall(ack_bytes)
+                    except (ConnectionResetError, BrokenPipeError, OSError) as exc:
+                        set_socket_error(f"Client {client_address} ack failed: {exc}")
+                        buffer = b""
+                        break
                 except ValueError as exc:
                     set_socket_error(str(exc))
-                except OSError as exc:
-                    set_socket_error(f"ACK send failed: {exc}")
-                    return
 
         if buffer:
             set_socket_error("Incomplete forwarded frame received")
@@ -376,6 +384,11 @@ def render_charts(data):
     if data.empty:
         return
     chart_data = data.sort_values("timestamp").set_index("timestamp")
+    if len(chart_data) >= 2:
+        time_span = chart_data.index.max() - chart_data.index.min()
+        if time_span.total_seconds() > 0:
+            cutoff = chart_data.index.max() - (time_span / 2)
+            chart_data = chart_data[chart_data.index >= cutoff]
     _, center, _ = st.columns([1, 3, 1])
     with center:
         st.subheader("Live sensor chart")

@@ -49,8 +49,6 @@ host, port = "10.42.0.1", 19001
 packet = struct.pack("<dddd", 24.3, 51.2, 1012.4, 420.0)
 with socket.create_connection((host, port), timeout=5) as sock:
 	sock.sendall(packet)
-	ack = sock.recv(64)
-	print("ACK:", ack.decode("utf-8", errors="replace"))
 PY
 ```
 
@@ -61,8 +59,6 @@ Forwarded binary frame format:
 - `light` (`double`)
 
 Byte order is little-endian (`<dddd`), configurable by env `FORWARDED_FRAME_FORMAT`.
-
-After each valid frame, server sends text ACK (`ACK` by default, configurable via `FORWARDED_FRAME_ACK`).
 
 ## Sensor simulator
 
