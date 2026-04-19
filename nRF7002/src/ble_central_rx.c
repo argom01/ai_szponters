@@ -73,6 +73,15 @@ static const char *sensor_names[SENSOR_COUNT] = {
 	[SENSOR_IDX_PRESS] = "pressure",
 };
 
+static const char *sensor_name_or_unknown(int idx)
+{
+	if (idx >= 0 && idx < SENSOR_COUNT) {
+		return sensor_names[idx];
+	}
+
+	return "unknown";
+}
+
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 			 struct net_buf_simple *ad);
 static void start_next_read_cycle(int start_idx);
@@ -192,9 +201,13 @@ static uint8_t read_cb(struct bt_conn *conn, uint8_t err,
 	}
 
 	if (!data) {
+		LOG_WRN("BLE RX: empty payload for %s", sensor_name_or_unknown(current_read_idx));
 		start_next_read_cycle(current_read_idx + 1);
 		return BT_GATT_ITER_STOP;
 	}
+
+	LOG_INF("received data bluetooth: %s len=%u", sensor_name_or_unknown(current_read_idx), (unsigned int)length);
+	LOG_HEXDUMP_INF(data, length, "BLE RX raw");
 
 	if (current_read_idx >= 0 && current_read_idx < SENSOR_COUNT) {
 		store_sensor_value(current_read_idx, data, length);

@@ -70,18 +70,33 @@ static inline void sensor_ringbuffer_push_values(struct sensor_ringbuffer *rb,
 	sensor_ringbuffer_push(rb, sample);
 }
 
-/* age == 0 returns the newest sample, age == count-1 the oldest. */
+/* age == 0 returns the newest sample, age == count-1 the oldest.
+ * If the buffer is empty, a zero-valued sample is returned.
+ */
 static inline bool sensor_ringbuffer_get_latest(const struct sensor_ringbuffer *rb,
 						       size_t age,
 						       struct sensor_sample *value_out)
 {
+	size_t count;
+	size_t head;
 	size_t index;
 
-	if (age >= rb->count || value_out == NULL) {
+	if (rb == NULL || value_out == NULL) {
 		return false;
 	}
 
-	index = (rb->head + SENSOR_RINGBUFFER_CAPACITY - 1U - age) %
+	count = rb->count;
+	if (count == 0U) {
+		*value_out = (struct sensor_sample){ 0 };
+		return true;
+	}
+
+	if (age >= count) {
+		age = count - 1U;
+	}
+
+	head = rb->head;
+	index = (head + SENSOR_RINGBUFFER_CAPACITY - 1U - age) %
 		SENSOR_RINGBUFFER_CAPACITY;
 	*value_out = rb->samples[index];
 
